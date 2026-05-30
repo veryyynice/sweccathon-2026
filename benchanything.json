@@ -1,0 +1,58 @@
+{
+  "id": "grid-runner",
+  "adapter": "adapter.py",
+  "name": "Grid Runner",
+  "description": "Skeleton env: an agent navigates a grid to a goal while avoiding hazards. Replace the logic in env.py with your own idea.",
+  "tags": ["skeleton", "navigation", "gridworld"],
+
+  "binding_vow": {
+    "version": "1.0.0",
+    "tier": "tier1",
+    "description": "From the top-left corner, reach the goal cell in as few moves as possible without stepping on a hazard. A good agent moves monotonically toward the goal and routes around hazards.",
+
+    "observation_space": {
+      "type": "json",
+      "description": "{ grid_size:int, agent:[r,c], goal:[r,c], hazards:[[r,c]...], steps:int, legal_actions:[string] }"
+    },
+
+    "action_space": {
+      "type": "discrete",
+      "enum_values": ["up", "down", "left", "right"],
+      "description": "One cardinal move per turn."
+    },
+
+    "reward": {
+      "type": "scalar",
+      "range": { "low": -10.0, "high": 10.0 },
+      "description": "+10 reaching goal, -10 hazard; +1 step toward goal, -1 step away, -1.5 wall/invalid."
+    },
+
+    "episode": {
+      "max_steps": 30,
+      "deterministic_reset": true,
+      "supports_seed": true,
+      "parallel_episodes": 1,
+      "observability": "full"
+    },
+
+    "techniques": []
+  },
+
+  "scoring": {
+    "primary_metric": "mean_reward",
+    "higher_is_better": true,
+    "metrics": [
+      {
+        "name": "mean_reward",
+        "type": "episode_reward",
+        "aggregation": "mean"
+      },
+      {
+        "name": "success_rate",
+        "type": "terminal_field",
+        "field": "event",
+        "aggregation": "pass_rate"
+      }
+    ]
+  }
+}
