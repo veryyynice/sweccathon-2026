@@ -1,30 +1,29 @@
 {
-  "id": "grid-runner",
+  "id": "long-horizon-grid-balancer",
   "adapter": "adapter.py",
-  "name": "Grid Runner",
-  "description": "Skeleton env: an agent navigates a grid to a goal while avoiding hazards. Replace the logic in env.py with your own idea.",
-  "tags": ["skeleton", "navigation", "gridworld"],
+  "name": "Long Horizon Grid Balancer",
+  "description": "Act as a Grid Operator managing a battery reserve against a hidden evening demand spike. Strategically spend a budget on forecasts of varying precision to locate the peak before committing to a final 24-hour dispatch schedule.",
+  "tags": ["planning", "information-gathering", "energy", "long-horizon"],
 
   "binding_vow": {
     "version": "1.0.0",
     "tier": "tier1",
-    "description": "From the top-left corner, reach the goal cell in as few moves as possible without stepping on a hazard. A good agent moves monotonically toward the goal and routes around hazards.",
+    "description": "Each turn, either buy a forecast of the hidden net load at one hour (cost vs. noise trade-off across 4 tiers) or submit a final 24-hour battery dispatch schedule. Score = 1000 if the dispatch prevents grid failure at the true hidden evening peak, else 0, minus total forecast cost. A good agent buys just enough precision to pin down the peak hour and magnitude, then concentrates its limited battery reserve there.",
 
     "observation_space": {
       "type": "json",
-      "description": "{ grid_size:int, agent:[r,c], goal:[r,c], hazards:[[r,c]...], steps:int, legal_actions:[string] }"
+      "description": "{ role, horizon_hours:24, grid_capacity, battery_reserve, max_discharge_rate, evening_window:[lo,hi], forecast_tiers:{tier:{cost,noise_std}}, budget_spent, steps_taken, max_steps, forecasts_purchased:[{hour,tier,observed}], last_forecast, action_schema }"
     },
 
     "action_space": {
-      "type": "discrete",
-      "enum_values": ["up", "down", "left", "right"],
-      "description": "One cardinal move per turn."
+      "type": "json",
+      "description": "ONE of: {\"action\":\"forecast\",\"tier\":\"quick|standard|precision|extreme\",\"target_hour\":int 0-23} OR {\"action\":\"dispatch\",\"battery_schedule\":[24 integers, +discharge / -charge, |value|<=max_discharge_rate]}"
     },
 
     "reward": {
       "type": "scalar",
-      "range": { "low": -10.0, "high": 10.0 },
-      "description": "+10 reaching goal, -10 hazard; +1 step toward goal, -1 step away, -1.5 wall/invalid."
+      "range": { "low": -300.0, "high": 1000.0 },
+      "description": "Forecast steps reward 0. Final dispatch (or timeout) yields (1000 if grid failure prevented at the true peak else 0) - total_cost_of_forecasts."
     },
 
     "episode": {
@@ -32,26 +31,26 @@
       "deterministic_reset": true,
       "supports_seed": true,
       "parallel_episodes": 1,
-      "observability": "full"
+      "observability": "partial"
     },
 
     "techniques": []
   },
 
   "scoring": {
-    "primary_metric": "mean_reward",
+    "primary_metric": "mean_score",
     "higher_is_better": true,
     "metrics": [
       {
-        "name": "mean_reward",
+        "name": "mean_score",
         "type": "episode_reward",
         "aggregation": "mean"
       },
       {
         "name": "success_rate",
         "type": "terminal_field",
-        "field": "event",
-        "aggregation": "pass_rate"
+        "field": "dispatch_success",
+        "aggregation": "mean"
       }
     ]
   }

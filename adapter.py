@@ -11,7 +11,7 @@ import argparse
 
 from bench_common.env_sdk import serve
 
-from env import GridRunnerEnv
+from env import GridBalancerEnv
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -19,5 +19,5 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    print(f"GridRunnerEnv adapter → http://{args.host}:{args.port}")
-    serve(GridRunnerEnv, host=args.host, port=args.port)
+    print(f"GridBalancerEnv adapter → http://{args.host}:{args.port}")
+    serve(GridBalancerEnv, host=args.host, port=args.port)

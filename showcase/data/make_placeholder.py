@@ -1,117 +1,122 @@
-"""Generate a placeholder replay so the showcase works before a real run.
+"""Generate placeholder replay data so the showcase works before a real run.
 
     python showcase/data/make_placeholder.py
 
-Writes showcase/data/replay.json and showcase/data/replay.js in the SAME
-schema that `mesocosm run export` produces, so the showcase renders identically
-whether it's reading placeholder data or a real exported run:
+Writes showcase/data/replay.json and showcase/data/replay.js in the SAME schema
+`mesocosm run export` produces:
 
     { run: {scores}, episodes: [...], replay: { <episodeId>: [turns] } }
 
 Each turn: { step, observation, reasoning, action, reward, terminated,
              truncated, info }  (info values are strings, like the platform).
 
-Once you have a real run, replace these files via:
+Replace with a real run via:
     mesocosm run export <RUN_ID> -o showcase/data/replay.json
-(and regenerate replay.js from it — see the bottom of this file).
+then regenerate replay.js as `window.REPLAY = <contents of replay.json>;`.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import random
 import sys
 from pathlib import Path
 
-# Make the repo root importable so we can drive the real env.
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from env import ACTIONS, GridRunnerEnv  # noqa: E402
+from env import EVENING_WINDOW, HOURS, MAX_DISCHARGE_RATE, GridBalancerEnv  # noqa: E402
 
 
-def smart(obs):
-    ar, ac = obs["agent"]
-    gr, gc = obs["goal"]
-    dr, dc = gr - ar, gc - ac
-    if abs(dr) >= abs(dc) and dr != 0:
-        return ("down" if dr > 0 else "up"), dr, dc
-    if dc != 0:
-        return ("right" if dc > 0 else "left"), dr, dc
-    return ("down" if dr > 0 else "up"), dr, dc
-
-
-def reasoning_for(obs, action, dr, dc) -> str:
-    return (
-        f"Agent at {obs['agent']}, goal at {obs['goal']} "
-        f"(Δrow={dr}, Δcol={dc}). {len(obs['hazards'])} hazards on the board. "
-        f"Closing the larger gap first → moving {action}."
-    )
-
-
-def build_episode(seed: int) -> list[dict]:
-    env = GridRunnerEnv()
+def build_episode(seed: int, scan_tier: str) -> list[dict]:
+    """A demo operator: scan the evening window at `scan_tier`, then dispatch
+    at the discovered peak. Mixed tiers across episodes make the scatter vary."""
+    env = GridBalancerEnv()
     obs = env.reset(seed=seed)
     turns: list[dict] = []
+    lo, hi = EVENING_WINDOW
+    scan_hours = list(range(lo, hi + 1))
+    readings: dict[int, float] = {}
     step = 0
-    while True:
+
+    def record(action, reasoning):
+        nonlocal obs, step
         step += 1
-        action, dr, dc = smart(obs)
-        reasoning = reasoning_for(obs, action, dr, dc)
         result = env.step(action)
-        turns.append(
-            {
-                "step": step,
-                "observation": obs,
-                "reasoning": reasoning,
-                "action": action,
-                "reward": result.reward,
-                "terminated": result.terminated,
-                "truncated": result.truncated,
-                "info": result.info,
-            }
-        )
+        turns.append({
+            "step": step,
+            "observation": obs,
+            "reasoning": reasoning,
+            "action": action,
+            "reward": result.reward,
+            "terminated": result.terminated,
+            "truncated": result.truncated,
+            "info": result.info,
+        })
         obs = result.observation
-        if result.terminated or result.truncated:
-            break
+        return result
+
+    for h in scan_hours:
+        reasoning = (
+            f"I don't yet know where the evening spike sits. Probing hour {h} with a "
+            f"'{scan_tier}' forecast (cost {obs['forecast_tiers'][scan_tier]['cost']}, "
+            f"noise σ={obs['forecast_tiers'][scan_tier]['noise_std']}) to map the "
+            f"{lo}:00–{hi}:00 window before committing my {obs['battery_reserve']}-unit reserve."
+        )
+        record({"action": "forecast", "tier": scan_tier, "target_hour": h}, reasoning)
+        for f in obs["forecasts_purchased"]:
+            readings[f["hour"]] = f["observed"]
+
+    peak = max(readings, key=readings.get)
+    est_required = readings[peak] - obs["grid_capacity"]
+    amount = max(0, min(MAX_DISCHARGE_RATE, int(math.ceil(est_required))))
+    schedule = [0] * HOURS
+    schedule[peak] = amount
+    reasoning = (
+        f"Scan done. The peak reads highest at hour {peak} (~{readings[peak]:.0f}), "
+        f"about {est_required:.0f} over the {obs['grid_capacity']:.0f} capacity. "
+        f"Concentrating {amount} units of discharge at hour {peak} and leaving the rest "
+        f"idle — spreading the reserve would leave the peak underserved."
+    )
+    record({"action": "dispatch", "battery_schedule": schedule}, reasoning)
     return turns
 
 
 def main() -> None:
-    rng = random.Random(0)
-    seeds = [rng.randint(0, 10_000) for _ in range(6)]
+    rng = random.Random(7)
+    tiers = ["standard", "precision", "quick", "standard", "precision", "extreme"]
+    seeds = [rng.randint(0, 10_000) for _ in tiers]
 
     replay: dict[str, list[dict]] = {}
     episodes: list[dict] = []
-    rewards_sum = 0.0
-    successes = 0
+    score_sum = 0.0
+    success = 0
 
-    for i, seed in enumerate(seeds):
+    for i, (seed, tier) in enumerate(zip(seeds, tiers)):
         ep_id = f"placeholder-ep-{i:02d}"
-        turns = build_episode(seed)
+        turns = build_episode(seed, tier)
         replay[ep_id] = turns
         total = sum(t["reward"] for t in turns)
-        rewards_sum += total
-        last = turns[-1]
-        reached = last["info"].get("event") == "goal"
-        successes += int(reached)
-        episodes.append(
-            {
-                "episode_id": ep_id,
-                "seed": seed,
-                "steps": len(turns),
-                "total_reward": round(total, 3),
-                "outcome": "goal" if reached else last["info"].get("event", "truncated"),
-            }
-        )
+        score_sum += total
+        last = turns[-1]["info"]
+        won = last.get("success") == "true"
+        success += int(won)
+        episodes.append({
+            "episode_id": ep_id,
+            "seed": seed,
+            "steps": len(turns),
+            "total_reward": round(total, 2),
+            "outcome": "prevented" if won else last.get("dispatch_reason", "failed"),
+        })
 
     export = {
         "schema_version": "1",
         "placeholder": True,
         "run": {
             "scores": {
-                "mean_reward": round(rewards_sum / len(seeds), 3),
-                "success_rate": round(successes / len(seeds), 3),
+                "mean_score": round(score_sum / len(seeds), 2),
+                "success_rate": round(success / len(seeds), 3),
             }
         },
         "episodes": episodes,
@@ -120,10 +125,11 @@ def main() -> None:
 
     out_dir = Path(__file__).resolve().parent
     (out_dir / "replay.json").write_text(json.dumps(export, indent=2), encoding="utf-8")
-    js = "window.REPLAY = " + json.dumps(export, indent=2) + ";\n"
-    (out_dir / "replay.js").write_text(js, encoding="utf-8")
-    print(f"wrote {out_dir/'replay.json'}")
-    print(f"wrote {out_dir/'replay.js'}")
+    (out_dir / "replay.js").write_text(
+        "window.REPLAY = " + json.dumps(export, indent=2) + ";\n", encoding="utf-8"
+    )
+    print(f"wrote {out_dir / 'replay.json'}")
+    print(f"wrote {out_dir / 'replay.js'}")
 
 
 if __name__ == "__main__":
