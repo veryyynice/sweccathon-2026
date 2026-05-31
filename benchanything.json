@@ -34,10 +34,10 @@
     },
 
     "techniques": [
-      "active information gathering",
-      "resource-constrained planning",
-      "hypothesis testing under uncertainty",
-      "confidence calibration"
+      { "technique_id": "active-information-gathering" },
+      { "technique_id": "resource-constrained-planning" },
+      { "technique_id": "hypothesis-testing-under-uncertainty" },
+      { "technique_id": "confidence-calibration" }
     ]
   },
 
