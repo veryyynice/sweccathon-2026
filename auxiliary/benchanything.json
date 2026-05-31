@@ -16,13 +16,13 @@
 
     "action_space": {
       "type": "json",
-      "description": "Either {\"type\":\"experiment\",\"x\":float,\"precision\":\"cheap|standard|high\"} or {\"type\":\"submit\",\"law\":string,\"confidence\":float[0,1]}."
+      "description": "Either {\"type\":\"experiment\",\"x\":float,\"precision\":\"cheap|standard|high\"} or {\"type\":\"submit\",\"law\":string}."
     },
 
     "reward": {
       "type": "scalar",
       "range": { "low": -80.0, "high": 100.0 },
-      "description": "Experiment actions incur negative cost. Submit reward depends on correctness, confidence calibration, remaining budget, and early-submit evidence penalties."
+      "description": "Experiment actions incur negative cost. Correct submit gets a large bonus plus remaining budget; incorrect submit is penalized."
     },
 
     "episode": {
@@ -33,12 +33,7 @@
       "observability": "full"
     },
 
-    "techniques": [
-      "active information gathering",
-      "resource-constrained planning",
-      "hypothesis testing under uncertainty",
-      "confidence calibration"
-    ]
+    "techniques": []
   },
 
   "scoring": {

@@ -1,9 +1,4 @@
-"""Efficient Scientific Discovery benchmark environment.
-
-##### STARTER VS CUSTOM NOTE
-##### The original starter code was a two-question quiz environment.
-##### Everything below is custom benchmark logic added for SWECCathon.
-"""
+"""Efficient Scientific Discovery benchmark environment."""
 
 from __future__ import annotations
 
@@ -21,11 +16,6 @@ PRECISION_SETTINGS = {
     "high": {"cost": 7.0, "noise_std": 0.25},
 }
 
-# ##### CUSTOM: anti-gaming and calibration controls
-MIN_EXPERIMENTS_BEFORE_SUBMIT = 3
-EARLY_SUBMIT_PENALTY = 25.0
-WRONG_SUBMIT_BASE_PENALTY = 45.0
-
 
 class MyEnv(BaseEnv):
     def __init__(self) -> None:
@@ -38,7 +28,6 @@ class MyEnv(BaseEnv):
         self._done = False
         self._budget_remaining = self._budget_start
         self._history: list[dict[str, Any]] = []
-        self._experiment_count = 0
         self._law_family = "linear"
         self._law_params: dict[str, float] = {}
 
@@ -48,7 +37,6 @@ class MyEnv(BaseEnv):
         self._done = False
         self._budget_remaining = self._budget_start
         self._history = []
-        self._experiment_count = 0
         self._law_family = self._rng.choice(LAW_FAMILIES)
         self._law_params = self._sample_law_params(self._law_family)
         return self._make_observation(last_result="episode_started")
@@ -155,7 +143,6 @@ class MyEnv(BaseEnv):
                 "observed_y": round(noisy_y, 4),
             }
         )
-        self._experiment_count += 1
 
         terminated = self._budget_remaining < min(p["cost"] for p in PRECISION_SETTINGS.values())
         reward = -cost
@@ -172,36 +159,17 @@ class MyEnv(BaseEnv):
                 "last_x": str(round(x, 4)),
                 "last_observed_y": str(round(noisy_y, 4)),
                 "last_precision": precision,
-                "experiment_count": str(self._experiment_count),
                 "hidden_family": self._law_family if terminated else "hidden",
             },
         )
 
     def _handle_submit(self, action: dict[str, Any]) -> StepResult:
         guess = str(action.get("law", "")).lower().strip()
-        confidence_raw = action.get("confidence", 0.5)
-        try:
-            confidence = float(confidence_raw)
-        except (TypeError, ValueError):
-            confidence = 0.5
-        confidence = max(0.0, min(1.0, confidence))
-
-        # ##### CUSTOM: require at least some evidence before final submission.
-        early_submit_penalty = 0.0
-        if self._experiment_count < MIN_EXPERIMENTS_BEFORE_SUBMIT:
-            early_submit_penalty = EARLY_SUBMIT_PENALTY
-
         correct = guess == self._law_family
         self._done = True
 
-        # ##### CUSTOM: confidence-calibrated scoring.
-        # High confidence helps only when correct, and hurts more when wrong.
-        if correct:
-            correctness_term = 65.0 + (25.0 * confidence)
-        else:
-            correctness_term = -(WRONG_SUBMIT_BASE_PENALTY + 25.0 * confidence)
-
-        reward = correctness_term + self._budget_remaining - early_submit_penalty
+        correctness_bonus = 80.0 if correct else -30.0
+        reward = correctness_bonus + self._budget_remaining
 
         return StepResult(
             observation=self._make_observation(last_result="submitted", reveal_law=True),
@@ -212,9 +180,6 @@ class MyEnv(BaseEnv):
                 "correct": str(correct),
                 "submitted_law": guess,
                 "true_law": self._law_family,
-                "confidence": str(round(confidence, 3)),
-                "early_submit_penalty": str(round(early_submit_penalty, 2)),
-                "experiment_count": str(self._experiment_count),
                 "budget_remaining": str(round(self._budget_remaining, 2)),
             },
         )
@@ -229,17 +194,11 @@ class MyEnv(BaseEnv):
                     "x": "float between -8 and 8",
                     "precision": "cheap|standard|high",
                 },
-                "submit": {
-                    "type": "submit",
-                    "law": "one of law_families",
-                    "confidence": "float in [0,1], optional",
-                },
+                "submit": {"type": "submit", "law": "one of law_families"},
             },
             "budget_remaining": round(self._budget_remaining, 2),
-            "min_experiments_before_submit": MIN_EXPERIMENTS_BEFORE_SUBMIT,
             "step": self._steps,
             "max_steps": self._max_steps,
-            "experiment_count": self._experiment_count,
             "history": self._history,
             "last_result": last_result,
             "hidden_law": self._law_family if reveal_law else "hidden",
