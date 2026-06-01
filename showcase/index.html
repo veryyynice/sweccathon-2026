@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mesocosm · Efficient Scientific Discovery — Replay Lab</title>
+<style>
+  :root{
+    --bg:#070a0f;
+    --panel:#0d1219;
+    --panel-2:#101824;
+    --line:#1b2735;
+    --ink:#cfe9e0;
+    --muted:#6f8597;
+    --green:#39ff9e;
+    --cyan:#37e0ff;
+    --amber:#ffcb47;
+    --red:#ff5d6c;
+    --violet:#b48cff;
+    --grid:rgba(55,224,255,.07);
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 80% -10%, rgba(55,224,255,.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(180,140,255,.10), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  /* faint scanlines for the retro-CRT vibe */
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.20) 2px 3px);
+    mix-blend-mode:multiply;opacity:.35;
+  }
+  a{color:var(--cyan);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .app{
+    height:100vh;display:grid;
+    grid-template-rows:auto 1fr;
+  }
+
+  /* ---------- header ---------- */
+  header{
+    display:flex;align-items:center;gap:18px;
+    padding:12px 20px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(15,22,32,.9),rgba(7,10,15,.6));
+    backdrop-filter:blur(6px);
+  }
+  .brand{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+  .brand .logo{
+    font-weight:700;letter-spacing:.28em;color:var(--green);
+    text-shadow:0 0 14px rgba(57,255,158,.5);
+  }
+  .brand .sub{color:var(--muted);letter-spacing:.12em;font-size:11px}
+  .runbar{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap;align-items:center}
+  .stat{display:flex;flex-direction:column;line-height:1.15}
+  .stat .k{color:var(--muted);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+  .stat .v{color:var(--ink);font-size:13px}
+  .stat .v.big{font-size:16px;color:var(--cyan)}
+
+  /* ---------- main 3-col ---------- */
+  .main{
+    display:grid;
+    grid-template-columns:230px minmax(0,1fr) 360px;
+    gap:14px;padding:14px;min-height:0;
+  }
+  .col{min-height:0;min-width:0;display:flex;flex-direction:column;gap:14px}
+  .card{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 0 0 1px rgba(0,0,0,.25) inset, 0 14px 40px rgba(0,0,0,.35);
+  }
+  .card .hd{
+    padding:9px 13px;border-bottom:1px solid var(--line);
+    color:var(--muted);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;
+    display:flex;align-items:center;gap:8px;
+  }
+  .card .hd .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  .card .bd{padding:12px 13px}
+
+  /* ---------- episode rail ---------- */
+  #rail{display:flex;flex-direction:column;gap:7px;overflow:auto;padding:10px}
+  .ep{
+    border:1px solid var(--line);border-radius:9px;padding:8px 9px;cursor:pointer;
+    background:rgba(255,255,255,.012);position:relative;overflow:hidden;
+    transition:transform .08s ease,border-color .15s ease,background .15s ease;
+  }
+  .ep:hover{border-color:var(--cyan);transform:translateX(2px)}
+  .ep.active{border-color:var(--green);background:rgba(57,255,158,.06);box-shadow:0 0 0 1px rgba(57,255,158,.25) inset}
+  .ep .bar{position:absolute;left:0;top:0;bottom:0;width:4px}
+  .ep .top{display:flex;justify-content:space-between;align-items:center;gap:6px;padding-left:6px}
+  .ep .name{font-size:12px;color:var(--ink)}
+  .ep .rw{font-size:12px;font-weight:700}
+  .ep .meta{padding-left:6px;color:var(--muted);font-size:10.5px;margin-top:2px;display:flex;justify-content:space-between}
+  .pill{font-size:9.5px;padding:1px 6px;border-radius:999px;border:1px solid currentColor;letter-spacing:.08em}
+
+  /* ---------- canvas / stage ---------- */
+  .stage{position:relative;flex:1;min-height:0}
+  .stage .bd{height:100%;display:flex;flex-direction:column;padding:0}
+  .canvas-wrap{position:relative;flex:1;min-height:0}
+  canvas{display:block;width:100%;height:100%}
+  #tooltip{
+    position:absolute;pointer-events:none;z-index:50;display:none;
+    background:rgba(9,14,20,.96);border:1px solid var(--cyan);border-radius:8px;
+    padding:7px 9px;font-size:11px;color:var(--ink);min-width:120px;
+    box-shadow:0 8px 24px rgba(0,0,0,.5);transform:translate(-50%,-115%);
+  }
+  #tooltip .t-k{color:var(--muted)}
+  #verdict{
+    position:absolute;left:50%;top:16px;transform:translateX(-50%);z-index:40;
+    padding:8px 16px;border-radius:10px;font-size:12px;letter-spacing:.1em;
+    border:1px solid var(--line);background:rgba(9,14,20,.92);display:none;text-align:center;
+    box-shadow:0 10px 30px rgba(0,0,0,.45);
+  }
+  .legend{
+    display:flex;gap:14px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:10.5px;align-items:center;
+  }
+  .legend .lg{display:flex;align-items:center;gap:6px}
+  .legend .sw{width:10px;height:10px;border-radius:50%}
+
+  /* ---------- transport ---------- */
+  .transport{padding:11px 13px;display:flex;flex-direction:column;gap:10px}
+  .scrub-row{display:flex;align-items:center;gap:12px}
+  .ticks{position:relative;flex:1;height:30px}
+  #scrub{
+    -webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;
+    background:var(--line);outline:none;margin:12px 0 0;cursor:pointer;
+  }
+  #scrub::-webkit-slider-thumb{
+    -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--green);box-shadow:0 0 10px var(--green);cursor:pointer;border:2px solid #06210f;
+  }
+  #scrub::-moz-range-thumb{
+    width:16px;height:16px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 10px var(--green);cursor:pointer;border:2px solid #06210f;
+  }
+  .turnmarks{position:absolute;inset:0;pointer-events:none}
+  .turnmarks i{position:absolute;top:3px;width:2px;height:8px;background:var(--muted);opacity:.5;transform:translateX(-1px)}
+  .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  button.ctl{
+    background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+    padding:7px 11px;font-family:var(--mono);font-size:12px;cursor:pointer;min-width:38px;
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    transition:border-color .12s,background .12s,color .12s;
+  }
+  button.ctl:hover{border-color:var(--cyan);color:var(--cyan)}
+  button.ctl.primary{border-color:var(--green);color:var(--green)}
+  button.ctl.primary:hover{background:rgba(57,255,158,.1)}
+  .spd{display:flex;gap:4px;margin-left:auto;align-items:center}
+  .spd .lab{color:var(--muted);font-size:10px;letter-spacing:.12em;margin-right:2px}
+  .spd button{padding:5px 8px;min-width:0;font-size:11px}
+  .spd button.on{border-color:var(--amber);color:var(--amber);background:rgba(255,203,71,.08)}
+  .turn-counter{font-size:12px;color:var(--muted);white-space:nowrap}
+  .turn-counter b{color:var(--cyan);font-size:14px}
+
+  /* ---------- HUD right ---------- */
+  .hud-col{overflow:auto}
+  .gauges{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .gauge{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:rgba(255,255,255,.012)}
+  .gauge .k{color:var(--muted);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase}
+  .gauge .v{font-size:20px;margin-top:2px}
+  .gauge .v small{font-size:11px;color:var(--muted)}
+  .bar-track{height:6px;border-radius:6px;background:var(--line);margin-top:7px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:6px;transition:width .25s ease}
+
+  .actionbox{
+    border:1px solid var(--line);border-radius:9px;padding:10px;background:rgba(0,0,0,.18);
+  }
+  .actionbox .tag{
+    display:inline-block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    padding:2px 8px;border-radius:999px;border:1px solid currentColor;margin-bottom:7px;
+  }
+  .actioncode{
+    font-size:12px;color:var(--cyan);white-space:pre-wrap;word-break:break-word;
+    background:rgba(55,224,255,.06);border:1px solid rgba(55,224,255,.18);
+    border-radius:7px;padding:7px 9px;
+  }
+  .reasoning{margin-top:10px;font-size:12.5px;color:var(--ink);line-height:1.6}
+  .reasoning b{color:var(--green)}
+  .reasoning .warn{color:var(--amber)}
+  .reasoning .bad{color:var(--red)}
+
+  .exptable{width:100%;border-collapse:collapse;font-size:11px;margin-top:2px}
+  .exptable th{color:var(--muted);text-align:right;font-weight:400;padding:3px 6px;border-bottom:1px solid var(--line);letter-spacing:.06em}
+  .exptable th:first-child{text-align:left}
+  .exptable td{text-align:right;padding:3px 6px;border-bottom:1px solid rgba(27,39,53,.5)}
+  .exptable td:first-child{text-align:left;color:var(--muted)}
+  .exptable tr.cur td{background:rgba(57,255,158,.08);color:var(--green)}
+
+  .hint{color:var(--muted);font-size:10.5px;letter-spacing:.04em}
+  kbd{background:var(--panel-2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;font-size:10px;color:var(--ink)}
+
+  .footer-note{padding:6px 20px;border-top:1px solid var(--line);color:var(--muted);font-size:10.5px;display:flex;gap:16px;flex-wrap:wrap}
+
+  @media (max-width:1100px){
+    body{overflow:auto}
+    .app{height:auto}
+    .main{grid-template-columns:1fr;height:auto}
+    .stage{height:60vh}
+    #rail{flex-direction:row;flex-wrap:wrap}
+    .ep{flex:1 1 180px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="logo">MESOCOSM</span>
+      <span class="sub">// REPLAY&nbsp;LAB</span>
+    </div>
+    <div class="runbar">
+      <div class="stat"><span class="k">Domain</span><span class="v" id="r-domain">—</span></div>
+      <div class="stat"><span class="k">Model</span><span class="v" id="r-model">—</span></div>
+      <div class="stat"><span class="k">Episodes</span><span class="v" id="r-eps">—</span></div>
+      <div class="stat"><span class="k">Mean reward</span><span class="v big" id="r-score">—</span></div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- LEFT : episode rail -->
+    <div class="col">
+      <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+        <div class="hd"><span class="dot"></span>Episodes</div>
+        <div id="rail"></div>
+      </div>
+    </div>
+
+    <!-- CENTER : stage + transport -->
+    <div class="col">
+      <div class="card stage">
+        <div class="hd"><span class="dot"></span><span id="stage-title">Experiment field</span>
+          <span style="margin-left:auto;color:var(--muted);text-transform:none;letter-spacing:0" id="stage-sub"></span>
+        </div>
+        <div class="bd">
+          <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="plot"></canvas>
+            <div id="verdict"></div>
+            <div id="tooltip"></div>
+          </div>
+          <div class="legend">
+            <div class="lg"><span class="sw" style="background:var(--violet)"></span>cheap probe (σ2.5)</div>
+            <div class="lg"><span class="sw" style="background:var(--cyan)"></span>standard (σ1.0)</div>
+            <div class="lg"><span class="sw" style="background:var(--green)"></span>high precision (σ0.25)</div>
+            <div class="lg"><span class="sw" style="background:var(--amber);border-radius:2px"></span>current action</div>
+            <div class="lg" style="margin-left:auto">x ∈ [-8, 8] · hover a probe to inspect</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="transport">
+          <div class="scrub-row">
+            <span class="turn-counter">TURN <b id="tc-cur">0</b> / <span id="tc-tot">0</span></span>
+            <div class="ticks">
+              <input type="range" id="scrub" min="0" max="0" value="0" step="1" />
+              <div class="turnmarks" id="turnmarks"></div>
+            </div>
+          </div>
+          <div class="controls">
+            <button class="ctl" id="btn-first" title="First turn">⏮</button>
+            <button class="ctl" id="btn-back" title="Step back (←)">◀ step</button>
+            <button class="ctl primary" id="btn-play" title="Play / pause (space)">▶ play</button>
+            <button class="ctl" id="btn-fwd" title="Step forward (→)">step ▶</button>
+            <button class="ctl" id="btn-last" title="Last turn">⏭</button>
+            <div class="spd">
+              <span class="lab">SPEED</span>
+              <button data-spd="0.5">0.5×</button>
+              <button data-spd="1" class="on">1×</button>
+              <button data-spd="2">2×</button>
+              <button data-spd="4">4×</button>
+            </div>
+          </div>
+          <div class="hint">Keys: <kbd>space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> step · <kbd>↑</kbd>/<kbd>↓</kbd> switch episode</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT : HUD -->
+    <div class="col hud-col">
+      <div class="card">
+        <div class="hd"><span class="dot"></span>Live HUD</div>
+        <div class="bd">
+          <div class="gauges">
+            <div class="gauge">
+              <div class="k">Step reward</div>
+              <div class="v" id="g-stepr">—</div>
+            </div>
+            <div class="gauge">
+              <div class="k">Cumulative</div>
+              <div class="v" id="g-cumr">—</div>
+            </div>
+            <div class="gauge">
+              <div class="k">Budget left</div>
+              <div class="v" id="g-budget">—<small> / 20</small></div>
+              <div class="bar-track"><div class="bar-fill" id="g-budget-bar" style="background:var(--cyan)"></div></div>
+            </div>
+            <div class="gauge">
+              <div class="k">Experiments</div>
+              <div class="v" id="g-exp">—<small> done</small></div>
+              <div class="bar-track"><div class="bar-fill" id="g-exp-bar" style="background:var(--green)"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="hd"><span class="dot" style="background:var(--cyan);box-shadow:0 0 8px var(--cyan)"></span>Agent · this turn</div>
+        <div class="bd">
+          <div class="actionbox">
+            <span class="tag" id="a-tag">ACTION</span>
+            <div class="actioncode" id="a-code">—</div>
+            <div class="reasoning" id="a-reason">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="hd"><span class="dot" style="background:var(--violet);box-shadow:0 0 8px var(--violet)"></span>Lab notebook</div>
+        <div class="bd">
+          <table class="exptable">
+            <thead><tr><th>#</th><th>x</th><th>obs y</th><th>prec</th><th>cost</th></tr></thead>
+            <tbody id="exp-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    <span id="f-ep">—</span>
+    <span style="margin-left:auto">Self-contained replay · reads <code>data/replay.json</code> (falls back to <code>window.REPLAY</code>)</span>
+  </div>
+</div>
+
+<script src="data/replay.js"></script>
+<script>
+"use strict";
+(function(){
+
+  /* ------------------------------------------------------------------ *
+   *  Data loading: prefer fetch(replay.json); fall back to window.REPLAY
+   *  so the page also works over file://
+   * ------------------------------------------------------------------ */
+  async function loadData(){
+    try{
+      const res = await fetch("data/replay.json", {cache:"no-store"});
+      if(res.ok) return await res.json();
+    }catch(e){ /* file:// or offline → fall back below */ }
+    if(window.REPLAY) return window.REPLAY;
+    throw new Error("No replay data: data/replay.json unreachable and window.REPLAY missing.");
+  }
+
+  /* ----- small helpers ----- */
+  const $ = sel => document.querySelector(sel);
+  const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const fmt = (v,d=2) => (v===null||v===undefined||Number.isNaN(v)) ? "—" : (Math.round(v*10**d)/10**d).toLocaleString();
+  const PREC_COLOR = {cheap:"#b48cff", standard:"#37e0ff", high:"#39ff9e"};
+  const LAW_BLURB = {
+    linear:"a straight line — constant slope",
+    quadratic:"a parabola — symmetric U, both ends large & same sign",
+    exponential:"flat on one side, exploding on the other",
+    periodic:"oscillating up & down with repeated sign changes",
+    piecewise:"two straight segments with a kink at x = 0"
+  };
+
+  /* ------------------------------------------------------------------ *
+   *  Model
+   * ------------------------------------------------------------------ */
+  let DATA, EPISODES = [], state = {
+    epIdx:0, turn:0, playing:false, speed:1, lastTick:0, raf:null
+  };
+
+  // Build a normalized per-episode model from the raw export.
+  function buildEpisodes(d){
+    const replay = d.replay || {};
+    const traceMeta = d.episodes || [];
+    const metaById = {};
+    traceMeta.forEach(m => metaById[m.id] = m);
+
+    // keep export order of episodes[] when available, else replay key order
+    const order = traceMeta.length ? traceMeta.map(m=>m.id).filter(id=>replay[id]) : Object.keys(replay);
+
+    return order.map((id, i) => {
+      const turnsRaw = replay[id] || [];
+      const meta = metaById[id] || {};
+      const ti = meta.terminal_info || {};
+      const correct = String(ti.correct) === "True";
+      const trueLaw = ti.true_law || null;
+      const guess = ti.submitted_law || null;
+      let outcome = "open";
+      if (guess) outcome = correct ? "correct" : "wrong";
+
+      // enrich each turn
+      let cum = 0;
+      const turns = turnsRaw.map((t, ti2) => {
+        const info = t.info || {};
+        const board = t.board_after || t.observation || {};
+        cum += (typeof t.reward === "number" ? t.reward : 0);
+        const action = t.action || {};
+        const isExp = action.type === "experiment";
+        return {
+          idx: ti2,
+          step: t.step,
+          action,
+          isExp,
+          reward: t.reward,
+          cum,
+          terminated: t.terminated,
+          truncated: t.truncated,
+          info,
+          reasoning: t.reasoning || null,
+          // numbers parsed from the string info fields, per schema note
+          lastX: num(info.last_x),
+          lastY: num(info.last_observed_y),
+          lastPrec: info.last_precision || action.precision || null,
+          budget: (typeof board.budget_remaining === "number") ? board.budget_remaining : num(info.budget_remaining),
+          expCount: num(info.experiment_count) ?? (typeof board.experiment_count==="number"?board.experiment_count:null),
+          history: Array.isArray(board.history) ? board.history : [],
+          revealLaw: (board.hidden_law && board.hidden_law !== "hidden") ? board.hidden_law : (t.terminated||t.truncated ? trueLaw : null)
+        };
+      });
+
+      // y-range across the whole episode (use the richest history)
+      let all = [];
+      turns.forEach(t => t.history.forEach(h => all.push(h.observed_y)));
+      let ymin = Math.min.apply(null, all.length?all:[-1]);
+      let ymax = Math.max.apply(null, all.length?all:[1]);
+      if (ymin === ymax){ ymin-=1; ymax+=1; }
+      const pad = (ymax-ymin)*0.12 || 1;
+
+      return {
+        id, seed: meta.seed, steps: meta.steps,
+        totalReward: meta.total_reward,
+        confidence: num(ti.confidence),
+        correct, trueLaw, guess, outcome,
+        turns,
+        ymin: ymin-pad, ymax: ymax+pad
+      };
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Canvas plot
+   * ------------------------------------------------------------------ */
+  const canvas = $("#plot"), ctx = canvas.getContext("2d");
+  const wrap = $("#canvasWrap"), tooltip = $("#tooltip");
+  const XMIN = -8, XMAX = 8;
+  let dpr = 1, pad = {l:46, r:18, t:18, b:34};
+  let plotPts = []; // screen-space points for hover
+
+  function resize(){
+    dpr = window.devicePixelRatio || 1;
+    const r = wrap.getBoundingClientRect();
+    canvas.width = Math.max(10, r.width*dpr);
+    canvas.height = Math.max(10, r.height*dpr);
+    draw();
+  }
+
+  function ep(){ return EPISODES[state.epIdx]; }
+  function curTurn(){ const e=ep(); return e.turns[Math.min(state.turn, e.turns.length-1)]; }
+
+  function draw(){
+    const e = ep(); if(!e) return;
+    const t = curTurn();
+    const W = canvas.width, H = canvas.height;
+    const L = pad.l*dpr, R = W - pad.r*dpr, T = pad.t*dpr, B = H - pad.b*dpr;
+    ctx.clearRect(0,0,W,H);
+
+    const x2px = x => L + (x - XMIN)/(XMAX-XMIN)*(R-L);
+    const y2px = y => B - (y - e.ymin)/(e.ymax - e.ymin)*(B-T);
+
+    // grid
+    ctx.lineWidth = 1*dpr; ctx.font = `${10*dpr}px ui-monospace,Menlo,Consolas,monospace`;
+    ctx.strokeStyle = "rgba(55,224,255,.08)"; ctx.fillStyle = "#6f8597";
+    ctx.textAlign="center"; ctx.textBaseline="top";
+    for(let gx=XMIN; gx<=XMAX; gx+=2){
+      const px=x2px(gx);
+      ctx.beginPath(); ctx.moveTo(px,T); ctx.lineTo(px,B); ctx.stroke();
+      ctx.fillText(gx, px, B+5*dpr);
+    }
+    ctx.textAlign="right"; ctx.textBaseline="middle";
+    const yticks=5;
+    for(let i=0;i<=yticks;i++){
+      const yv = e.ymin + (e.ymax-e.ymin)*i/yticks;
+      const py = y2px(yv);
+      ctx.beginPath(); ctx.moveTo(L,py); ctx.lineTo(R,py); ctx.stroke();
+      ctx.fillText(fmt(yv,1), L-6*dpr, py);
+    }
+    // axes (x=0 and y=0 emphasized)
+    ctx.strokeStyle="rgba(207,233,224,.28)"; ctx.lineWidth=1.5*dpr;
+    if(0>=e.ymin && 0<=e.ymax){ const p0=y2px(0); ctx.beginPath(); ctx.moveTo(L,p0); ctx.lineTo(R,p0); ctx.stroke(); }
+    { const px0=x2px(0); ctx.beginPath(); ctx.moveTo(px0,T); ctx.lineTo(px0,B); ctx.stroke(); }
+
+    // axis labels
+    ctx.fillStyle="#6f8597"; ctx.textAlign="center"; ctx.textBaseline="bottom";
+    ctx.fillText("x  (experiment input)", (L+R)/2, H-2*dpr);
+    ctx.save(); ctx.translate(12*dpr,(T+B)/2); ctx.rotate(-Math.PI/2);
+    ctx.textBaseline="top"; ctx.fillText("observed y", 0,0); ctx.restore();
+
+    // connecting polyline through probes sorted by x (suggests the shape)
+    const hist = t.history.slice().sort((a,b)=>a.x-b.x);
+    if(hist.length>=2){
+      ctx.strokeStyle="rgba(255,203,71,.30)"; ctx.lineWidth=1.5*dpr;
+      ctx.setLineDash([4*dpr,4*dpr]); ctx.beginPath();
+      hist.forEach((h,i)=>{ const px=x2px(h.x),py=y2px(h.observed_y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // highlight current action's x with a vertical guide
+    plotPts = [];
+    const curX = (t.isExp && t.lastX!==null) ? t.lastX : null;
+    if(curX!==null){
+      const px=x2px(curX);
+      ctx.strokeStyle="rgba(255,203,71,.5)"; ctx.lineWidth=1.5*dpr; ctx.setLineDash([2*dpr,4*dpr]);
+      ctx.beginPath(); ctx.moveTo(px,T); ctx.lineTo(px,B); ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // probe points
+    t.history.forEach((h,i)=>{
+      const px=x2px(h.x), py=y2px(h.observed_y);
+      const last = (i===t.history.length-1);
+      const col = PREC_COLOR[h.precision] || "#37e0ff";
+      const r = (last && t.isExp) ? 7*dpr : 4.5*dpr;
+      // glow
+      ctx.beginPath(); ctx.fillStyle = col + "22";
+      ctx.arc(px,py, r*2.0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.fillStyle = col;
+      ctx.arc(px,py, r, 0, Math.PI*2); ctx.fill();
+      if(last && t.isExp){
+        ctx.strokeStyle="#ffcb47"; ctx.lineWidth=2*dpr;
+        ctx.beginPath(); ctx.arc(px,py, r+4*dpr, 0, Math.PI*2); ctx.stroke();
+      }
+      plotPts.push({px,py,r:Math.max(r,7*dpr),data:h});
+    });
+
+    drawTitle(e,t);
+  }
+
+  function drawTitle(e,t){
+    $("#stage-title").textContent = `Experiment field · seed ${e.seed}`;
+    $("#stage-sub").textContent = t.revealLaw ? `true law revealed: ${t.revealLaw}` : `hidden law · ${t.history.length} probe${t.history.length===1?"":"s"} so far`;
+  }
+
+  /* hover-to-inspect */
+  wrap.addEventListener("mousemove", ev=>{
+    const r = canvas.getBoundingClientRect();
+    const mx=(ev.clientX-r.left)*dpr, my=(ev.clientY-r.top)*dpr;
+    let best=null,bd=1e9;
+    plotPts.forEach(p=>{ const d=Math.hypot(p.px-mx,p.py-my); if(d<p.r+6*dpr && d<bd){bd=d;best=p;} });
+    if(best){
+      const h=best.data;
+      tooltip.style.display="block";
+      tooltip.style.left=(best.px/dpr)+"px";
+      tooltip.style.top=(best.py/dpr)+"px";
+      tooltip.innerHTML =
+        `<div><span class="t-k">probe&nbsp;#</span> ${h.step}</div>`+
+        `<div><span class="t-k">x</span> ${fmt(h.x,2)}</div>`+
+        `<div><span class="t-k">observed&nbsp;y</span> ${fmt(h.observed_y,3)}</div>`+
+        `<div><span class="t-k">precision</span> ${h.precision}</div>`+
+        `<div><span class="t-k">cost</span> ${fmt(h.cost,1)}</div>`;
+    } else tooltip.style.display="none";
+  });
+  wrap.addEventListener("mouseleave", ()=> tooltip.style.display="none");
+
+  /* ------------------------------------------------------------------ *
+   *  HUD + reasoning narrative
+   * ------------------------------------------------------------------ */
+  function narrative(e,t){
+    if(t.reasoning) return escapeHtml(t.reasoning); // honor real model text if present
+    const a = t.action || {};
+    if(t.isExp){
+      const where = t.lastX===0 ? "the origin (x=0)" : `x = <b>${fmt(t.lastX,1)}</b>`;
+      const edge = (Math.abs(t.lastX)>=7) ? " — sampling the far edge of the domain to expose end behaviour" :
+                   (Math.abs(t.lastX)<=1) ? " — pinning the centre to read the intercept" : "";
+      let s = `Probe ${t.expCount?("#"+t.expCount):""}: measure the system at ${where} with <b>${t.lastPrec||"?"}</b> precision${edge}. `+
+              `Instrument returns y ≈ <b>${fmt(t.lastY,2)}</b>.`;
+      if(t.budget!==null && t.budget<=6) s += ` <span class="warn">Budget running low (${fmt(t.budget,1)} left) — must decide soon.</span>`;
+      return s;
+    }
+    // submit
+    const conf = num(a.confidence);
+    const guess = (a.law||t.guess||"?");
+    let s = `Decision: classify the hidden law as <b>${guess}</b> at ${conf!==null?Math.round(conf*100)+"%":"—"} confidence — `+
+            `the data looks like ${LAW_BLURB[guess]||"that family"}. `;
+    if(t.info && String(t.info.correct)==="True"){
+      s += `<b>Correct.</b> Reward +${fmt(t.reward,1)} (kept ${fmt(t.budget,1)} budget).`;
+    }else if(t.info && t.info.true_law){
+      s += `<span class="bad">Wrong — the true law was ${t.info.true_law} (${LAW_BLURB[t.info.true_law]||""}).</span> Reward ${fmt(t.reward,1)}.`;
+    }
+    return s;
+  }
+  function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+  function renderHUD(){
+    const e=ep(), t=curTurn();
+    $("#tc-cur").textContent = state.turn+1;
+    $("#tc-tot").textContent = e.turns.length;
+
+    const sr=t.reward;
+    const sEl=$("#g-stepr");
+    sEl.textContent=(sr>=0?"+":"")+fmt(sr,1);
+    sEl.style.color = sr>0?"var(--green)":sr<0?"var(--red)":"var(--ink)";
+    const cEl=$("#g-cumr");
+    cEl.textContent=(t.cum>=0?"+":"")+fmt(t.cum,1);
+    cEl.style.color = t.cum>0?"var(--green)":t.cum<0?"var(--red)":"var(--ink)";
+
+    const b=t.budget===null?0:t.budget;
+    $("#g-budget").innerHTML = `${fmt(b,1)}<small> / 20</small>`;
+    $("#g-budget-bar").style.width = Math.max(0,Math.min(100,b/20*100))+"%";
+    $("#g-budget-bar").style.background = b<6?"var(--amber)":"var(--cyan)";
+
+    const ec=t.expCount===null?0:t.expCount;
+    $("#g-exp").innerHTML = `${ec}<small> done · min 3</small>`;
+    $("#g-exp-bar").style.width = Math.max(0,Math.min(100,ec/6*100))+"%";
+    $("#g-exp-bar").style.background = ec<3?"var(--amber)":"var(--green)";
+
+    // action box
+    const a=t.action||{};
+    const tag=$("#a-tag");
+    if(t.isExp){ tag.textContent="EXPERIMENT"; tag.style.color="var(--cyan)"; }
+    else { tag.textContent="SUBMIT"; tag.style.color = String(t.info&&t.info.correct)==="True" ? "var(--green)":"var(--red)"; }
+    $("#a-code").textContent = JSON.stringify(a);
+    $("#a-reason").innerHTML = narrative(e,t);
+
+    // notebook
+    const tb=$("#exp-rows"); tb.innerHTML="";
+    const curStep = t.isExp ? t.history.length : -1;
+    t.history.forEach((h,i)=>{
+      const tr=document.createElement("tr");
+      if(t.isExp && i===t.history.length-1) tr.className="cur";
+      tr.innerHTML=`<td>${i+1}</td><td>${fmt(h.x,1)}</td><td>${fmt(h.observed_y,2)}</td><td>${h.precision}</td><td>${fmt(h.cost,1)}</td>`;
+      tb.appendChild(tr);
+    });
+    if(!t.history.length){ tb.innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--muted)">no probes yet</td></tr>`; }
+
+    // verdict overlay
+    const v=$("#verdict");
+    if(!t.isExp){
+      const ok=String(t.info&&t.info.correct)==="True";
+      v.style.display="block";
+      v.style.borderColor = ok?"var(--green)":"var(--red)";
+      v.style.color = ok?"var(--green)":"var(--red)";
+      v.innerHTML = ok
+        ? `✓ SUBMITTED ${(a.law||"").toUpperCase()} — CORRECT &nbsp;·&nbsp; reward ${fmt(t.reward,1)}`
+        : `✕ SUBMITTED ${(a.law||"").toUpperCase()} — WRONG (was ${(t.info.true_law||"").toUpperCase()}) &nbsp;·&nbsp; reward ${fmt(t.reward,1)}`;
+    } else v.style.display="none";
+
+    $("#f-ep").textContent = `episode ${state.epIdx+1}/${EPISODES.length} · id ${e.id.slice(0,8)}… · seed ${e.seed} · ${e.steps} steps · total ${fmt(e.totalReward,1)}`;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Episode rail
+   * ------------------------------------------------------------------ */
+  const OUTCOME_COLOR = {correct:"var(--green)", wrong:"var(--red)", open:"var(--amber)"};
+  function renderRail(){
+    const rail=$("#rail"); rail.innerHTML="";
+    EPISODES.forEach((e,i)=>{
+      const col=OUTCOME_COLOR[e.outcome];
+      const div=document.createElement("div");
+      div.className="ep"+(i===state.epIdx?" active":"");
+      div.innerHTML=
+        `<span class="bar" style="background:${col}"></span>`+
+        `<div class="top"><span class="name">seed ${e.seed}</span>`+
+        `<span class="rw" style="color:${e.totalReward>=0?'var(--green)':'var(--red)'}">${e.totalReward>=0?"+":""}${fmt(e.totalReward,1)}</span></div>`+
+        `<div class="meta"><span>${e.trueLaw||"?"}${e.guess&&e.guess!==e.trueLaw?` → <span style="color:var(--red)">${e.guess}</span>`:""}</span>`+
+        `<span class="pill" style="color:${col}">${e.outcome}</span></div>`;
+      div.addEventListener("click",()=>selectEpisode(i));
+      rail.appendChild(div);
+    });
+  }
+
+  function selectEpisode(i){
+    state.epIdx=i; state.turn=0;
+    const e=ep();
+    const sc=$("#scrub"); sc.max=e.turns.length-1; sc.value=0;
+    renderTurnmarks();
+    renderRail(); resize(); renderHUD(); syncScrub();
+  }
+
+  function renderTurnmarks(){
+    const e=ep(), host=$("#turnmarks"); host.innerHTML="";
+    const n=e.turns.length;
+    for(let i=0;i<n;i++){
+      const m=document.createElement("i");
+      m.style.left=(n<=1?0:(i/(n-1)*100))+"%";
+      const last=e.turns[i];
+      if(!last.isExp){ m.style.background = String(last.info&&last.info.correct)==="True"?"var(--green)":"var(--red)"; m.style.opacity=".9"; m.style.height="12px"; m.style.top="1px"; }
+      host.appendChild(m);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Transport / playback
+   * ------------------------------------------------------------------ */
+  function syncScrub(){ $("#scrub").value=state.turn; }
+  function gotoTurn(i){
+    const e=ep();
+    state.turn=Math.max(0,Math.min(e.turns.length-1,i));
+    syncScrub(); draw(); renderHUD();
+  }
+  function stepFwd(){
+    const e=ep();
+    if(state.turn>=e.turns.length-1){ pause(); return; }
+    gotoTurn(state.turn+1);
+  }
+  function stepBack(){ gotoTurn(state.turn-1); }
+
+  function play(){
+    if(state.playing) return;
+    const e=ep();
+    if(state.turn>=e.turns.length-1) state.turn=0; // restart if at end
+    state.playing=true; $("#btn-play").innerHTML="❚❚ pause"; state.lastTick=performance.now();
+    loop();
+  }
+  function pause(){ state.playing=false; $("#btn-play").innerHTML="▶ play"; if(state.raf) cancelAnimationFrame(state.raf); }
+  function togglePlay(){ state.playing?pause():play(); }
+  function loop(){
+    if(!state.playing) return;
+    const now=performance.now();
+    const interval=900/state.speed; // ms per turn at 1x
+    if(now-state.lastTick>=interval){
+      state.lastTick=now;
+      const e=ep();
+      if(state.turn>=e.turns.length-1){ pause(); return; }
+      gotoTurn(state.turn+1);
+    }
+    state.raf=requestAnimationFrame(loop);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Wire up controls
+   * ------------------------------------------------------------------ */
+  function wire(){
+    $("#btn-play").onclick=togglePlay;
+    $("#btn-fwd").onclick=()=>{pause();stepFwd();};
+    $("#btn-back").onclick=()=>{pause();stepBack();};
+    $("#btn-first").onclick=()=>{pause();gotoTurn(0);};
+    $("#btn-last").onclick=()=>{pause();gotoTurn(ep().turns.length-1);};
+    $("#scrub").addEventListener("input",ev=>{ pause(); gotoTurn(parseInt(ev.target.value,10)); });
+
+    document.querySelectorAll(".spd button").forEach(b=>{
+      b.onclick=()=>{
+        state.speed=parseFloat(b.dataset.spd);
+        document.querySelectorAll(".spd button").forEach(x=>x.classList.remove("on"));
+        b.classList.add("on");
+      };
+    });
+
+    window.addEventListener("keydown",ev=>{
+      if(ev.target.tagName==="INPUT") return;
+      if(ev.code==="Space"){ ev.preventDefault(); togglePlay(); }
+      else if(ev.code==="ArrowRight"){ ev.preventDefault(); pause(); stepFwd(); }
+      else if(ev.code==="ArrowLeft"){ ev.preventDefault(); pause(); stepBack(); }
+      else if(ev.code==="ArrowDown"){ ev.preventDefault(); pause(); selectEpisode((state.epIdx+1)%EPISODES.length); }
+      else if(ev.code==="ArrowUp"){ ev.preventDefault(); pause(); selectEpisode((state.epIdx-1+EPISODES.length)%EPISODES.length); }
+    });
+
+    window.addEventListener("resize",resize);
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Boot
+   * ------------------------------------------------------------------ */
+  async function boot(){
+    try{ DATA = await loadData(); }
+    catch(err){ document.body.innerHTML=`<div style="padding:40px;color:#ff5d6c;font-family:monospace">${err.message}</div>`; return; }
+
+    EPISODES = buildEpisodes(DATA);
+    const run = DATA.run||{};
+    $("#r-domain").textContent = DATA.domain_name || "—";
+    $("#r-model").textContent = (run.config && run.config.agent_config && run.config.agent_config.model) || "—";
+    $("#r-eps").textContent = EPISODES.length;
+    const mer = run.scores && (run.scores.mean_episode_reward ?? run.scores.mean_reward);
+    $("#r-score").textContent = (mer===undefined||mer===null) ? "—" : fmt(mer,2);
+
+    wire();
+    selectEpisode(0);
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
